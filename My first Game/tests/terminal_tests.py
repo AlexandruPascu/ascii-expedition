@@ -26,18 +26,19 @@ class Terminal:
         for i in range(0,len(route),32): self.send(route[i:i+32],.08)
         self.read(.08)
     def rows(self):
-        rows={}
         data=self.data.rsplit(b'\x1b[2J',1)[-1]
-        for match in re.finditer(rb'\x1b\[(\d+);1H(.*?)(?=\x1b\[\d+;1H|\Z)',data,re.S):
-            raw=ansi.sub(b'',match[2])
-            if match.end()==len(data):
-                # PTYs may split any write, including an ANSI sequence. Keep
-                # the previous complete row until all 80 columns have arrived.
-                raw=raw.split(b'\x1b',1)[0]
-                if len(raw)<80: continue
-            text=raw.decode('utf-8',errors='replace')
-            rows[int(match[1])]=text[:80].ljust(80)
-        return [rows.get(i,'') for i in range(1,38)]
+        # Every game frame redraws rows 1..37. A PTY can split a write
+        # anywhere; use the newest complete frame, never a mix of two frames.
+        for frame in reversed(data.rsplit(b'\x1b[1;1H',2)[1:]):
+            rows={}
+            for match in re.finditer(rb'\x1b\[(\d+);1H(.*?)(?=\x1b\[\d+;1H|\Z)',b'\x1b[1;1H'+frame,re.S):
+                raw=ansi.sub(b'',match[2]).split(b'\x1b',1)[0]
+                rows[int(match[1])]=raw.decode('utf-8',errors='replace')[:80]
+            complete=len(rows.get(37,''))==80
+            resized=rows.get(1,'').startswith('WINDOW TOO SMALL')
+            if complete or resized:
+                return [rows.get(i,'').ljust(80) for i in range(1,38)]
+        return [' '*80 for _ in range(37)]
     def screen(self): return '\n'.join(self.rows())
     def expect(self,text):
         assert text in self.screen(), f'Missing {text!r}\n{self.screen()}'
@@ -53,6 +54,14 @@ class Terminal:
             match=re.search(r' O-|-O ',row)
             if match: return (match.start(),y)
         raise AssertionError('Player not visible')
+    def wait_player(self,expected,timeout=3.5):
+        deadline=time.monotonic()+timeout
+        while True:
+            try: actual=self.player()
+            except AssertionError: actual=None
+            if actual==expected: return
+            assert time.monotonic()<deadline, f'Expected player at {expected}, got {actual}\n{self.screen()}'
+            self.read(.06)
     def quit(self):
         self.send('q',.15)
         return self.finish()
@@ -133,14 +142,24 @@ def polish_checks(executable):
 
 
 def reader_checks():
+    def frame(score,player_y):
+        rows=[b' '*80 for _ in range(37)]
+        rows[10]=score.ljust(80)
+        rows[player_y]=b' O-'.ljust(80)
+        return b''.join(f'\x1b[{i+1};1H'.encode()+row for i,row in enumerate(rows))+b'\x1b[0m'
     app=Terminal.__new__(Terminal)
-    old=b'Score: 550    Best: 550'.ljust(80)
-    new=b'Score: 1200    Best: 1200'.ljust(80)
-    app.data=b'\x1b[2J\x1b[11;1H'+old+b'\x1b[11;1H'+new[:12]+b'\x1b[9'
-    assert app.rows()[10]==old.decode(), 'A partial row must not overwrite a complete row'
-    app.data+=b'3m'+new[12:]+b'\x1b[0m'
-    assert app.rows()[10]==new.decode(), 'A completed row must replace the previous row'
-    print('PASS terminal reader handles fragmented rows and ANSI sequences')
+    old=b'Score: 550    Best: 550'
+    new=b'Score: 1200    Best: 1200'
+    old_frame,new_frame=frame(old,5),frame(new,6)
+    cut=new_frame.index(new)+12
+    app.data=b'\x1b[2J'+old_frame+new_frame[:cut]+b'\x1b[9'
+    assert app.rows()[10]==old.decode().ljust(80), 'A partial frame must not overwrite the score'
+    assert app.player()==(0,5), 'A partial frame must not mix old and new player positions'
+    app.data+=b'3m'+new_frame[cut:-15]
+    assert app.player()==(0,5), 'Wait for the final row before using the next frame'
+    app.data+=new_frame[-15:]
+    assert app.rows()[10]==new.decode().ljust(80) and app.player()==(0,6), 'A complete frame must replace the previous frame'
+    print('PASS terminal reader handles fragmented frames and ANSI sequences')
 
 
 def main():
@@ -173,11 +192,11 @@ def main():
             app.send('r'); app.expect('Score: 0'); app.expect('Seed: 42')
             app.route(plans['boost']); app.expect('SPEED x2'); app.expect('Speed boost acquired')
             x,y,dx,dy=map(int,plans['step'].split())
-            assert app.player()==(x,y)
+            app.wait_player((x,y))
             arrow={(1,0):'C',(-1,0):'D',(0,1):'B',(0,-1):'A'}[(dx,dy)]
             reverse={(1,0):'D',(-1,0):'C',(0,1):'A',(0,-1):'B'}[(dx,dy)]
-            app.send('\x1b['+arrow); assert app.player()==(x+dx*2,y+dy*2),'Arrow must take two boosted steps'
-            app.send('\x1b[1;2'+reverse); assert app.player()==(x+dx,y+dy),'Shift arrow must take one precise step'
+            app.send('\x1b['+arrow); app.wait_player((x+dx*2,y+dy*2))
+            app.send('\x1b[1;2'+reverse); app.wait_player((x+dx,y+dy))
             app.send('n'); app.expect('Score: 0'); assert 'Seed: 42' not in app.screen()
             app.send('m'); app.send('1'); app.expect('Relaxed'); app.expect('Lives: 5'); app.expect('Time: OFF')
             summary=app.quit()
