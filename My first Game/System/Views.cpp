@@ -44,7 +44,7 @@ namespace MyGame
     {
         screen.Clear();
         Panel(screen,5,3,70,29,Color::Cyan);
-        screen.Text(9,5,"EA WORKSHOP - TERMINAL EXPEDITIONS",Color::Cyan);
+        screen.Text(9,5,"ASCII EXPEDITION",Color::Cyan);
         screen.Text(9,7,"Choose a difficulty. Each mode keeps its own high score.");
         const char* details[]={"5 lives | no timer | slower patrols","3 lives | 2 minutes | balanced patrols","2 lives | 90 seconds | faster, extra patrols"};
         for(int i=0;i<3;++i)

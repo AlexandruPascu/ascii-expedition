@@ -29,7 +29,7 @@ def render_svg(data):
         raise RuntimeError('No complete game frame was captured')
     output = [
         '<svg xmlns="http://www.w3.org/2000/svg" width="768" height="750" viewBox="0 0 768 750" role="img" aria-labelledby="title description">',
-        '<title id="title">EA Workshop terminal game: a generated expedition</title>',
+        '<title id="title">ASCII Expedition: a generated map</title>',
         '<desc id="description">Actual terminal capture of Normal difficulty, seed 42. Rooms contain stars, crates, guards, a scout, a sentry, and power-ups. Controls and run information appear below the arena.</desc>',
         '<rect width="768" height="750" rx="12" fill="#0d1117"/>',
         '<path d="M0 46H768" stroke="#30363d"/>',
@@ -37,7 +37,7 @@ def render_svg(data):
         '<circle cx="42" cy="23" r="5" fill="#f2cc60"/>',
         '<circle cx="60" cy="23" r="5" fill="#7ee787"/>',
         '<g font-family="DejaVu Sans Mono,Consolas,monospace" font-size="14" xml:space="preserve">',
-        '<text x="92" y="28" fill="#8b949e">EA WORKSHOP / TERMINAL EXPEDITIONS</text>',
+        '<text x="92" y="28" fill="#8b949e">ASCII EXPEDITION</text>',
     ]
     color = COLORS[0]
     for row_number, raw in rows:
