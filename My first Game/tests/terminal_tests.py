@@ -69,7 +69,14 @@ class Terminal:
         self.proc.wait(timeout=5)
         self.read(.05)
         assert self.proc.returncode==0
-        assert termios.tcgetattr(self.slave)==self.original, 'Terminal input mode not restored'
+        restored,expected=termios.tcgetattr(self.slave),self.original[:]
+        if sys.platform=='darwin':
+            # Darwin sets PENDIN when ICANON is restored. This is transient
+            # input-queue state; still compare every other flag and control byte.
+            # https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/tty.c
+            restored[3]&=~termios.PENDIN
+            expected[3]&=~termios.PENDIN
+        assert restored==expected, f'Terminal input mode not restored: {restored!r} != {expected!r}'
         assert b'\x1b[?25h\x1b[?1049l' in self.data, 'Cursor/alternate screen not restored'
         result=ansi.sub(b'',self.data).decode('utf-8',errors='replace')
         os.close(self.master); os.close(self.slave)
