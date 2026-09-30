@@ -27,8 +27,15 @@ class Terminal:
         self.read(.08)
     def rows(self):
         rows={}
-        for match in re.finditer(rb'\x1b\[(\d+);1H(.*?)(?=\x1b\[\d+;1H|\Z)',self.data.rsplit(b'\x1b[2J',1)[-1],re.S):
-            text=ansi.sub(b'',match[2]).decode('utf-8',errors='replace')
+        data=self.data.rsplit(b'\x1b[2J',1)[-1]
+        for match in re.finditer(rb'\x1b\[(\d+);1H(.*?)(?=\x1b\[\d+;1H|\Z)',data,re.S):
+            raw=ansi.sub(b'',match[2])
+            if match.end()==len(data):
+                # PTYs may split any write, including an ANSI sequence. Keep
+                # the previous complete row until all 80 columns have arrived.
+                raw=raw.split(b'\x1b',1)[0]
+                if len(raw)<80: continue
+            text=raw.decode('utf-8',errors='replace')
             rows[int(match[1])]=text[:80].ljust(80)
         return [rows.get(i,'') for i in range(1,38)]
     def screen(self): return '\n'.join(self.rows())
@@ -125,7 +132,19 @@ def polish_checks(executable):
         print('PASS shrinking/restoring windows, small startup, paused timers, and SIGINT restoration')
 
 
+def reader_checks():
+    app=Terminal.__new__(Terminal)
+    old=b'Score: 550    Best: 550'.ljust(80)
+    new=b'Score: 1200    Best: 1200'.ljust(80)
+    app.data=b'\x1b[2J\x1b[11;1H'+old+b'\x1b[11;1H'+new[:12]+b'\x1b[9'
+    assert app.rows()[10]==old.decode(), 'A partial row must not overwrite a complete row'
+    app.data+=b'3m'+new[12:]+b'\x1b[0m'
+    assert app.rows()[10]==new.decode(), 'A completed row must replace the previous row'
+    print('PASS terminal reader handles fragmented rows and ANSI sequences')
+
+
 def main():
+    reader_checks()
     executable=Path(sys.argv[1]).resolve()
     plans=dict(line.split('\t',1) for line in subprocess.check_output([sys.argv[2]],text=True,timeout=10).splitlines())
     with tempfile.TemporaryDirectory(prefix='ea-feature-smoke-') as temp:

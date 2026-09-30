@@ -277,16 +277,28 @@ int main()
                     Check(g.Hazards()[i].phase == phase && g.Hazards()[i].cycleMillis == cycle, "Stunned patrol must freeze movement and pulse timing");
                     g.Update(500);
                     Check(g.Hazards()[i].cycleMillis != cycle && (kind == PatrolKind::Sentry || g.Hazards()[i].phase != phase), "Patrol must resume after stun expires");
-                    return;
+                    return true;
                 }
             }
-            throw std::runtime_error("No safe shot at a patrol found");
+            return false;
         };
-        Game tutorial(42);
-        Clear(tutorial); tutorial.NextLevel();
-        stun(tutorial, PatrolKind::Guard);
+        // Standard-library random distributions produce different layouts. Find
+        // a safe firing position without requiring one particular seed to have it.
+        bool tutorialStunned=false;
+        for (std::uint32_t seed=42; seed<74 && !tutorialStunned; ++seed)
+        {
+            Game tutorial(seed);
+            Clear(tutorial); tutorial.NextLevel();
+            tutorialStunned=stun(tutorial, PatrolKind::Guard);
+        }
+        Check(tutorialStunned, "No safe tutorial shot at a guard found");
         for (PatrolKind kind : {PatrolKind::Guard, PatrolKind::Scout, PatrolKind::Sentry})
-            stun(Game(42, true), kind);
+        {
+            bool expeditionStunned=false;
+            for (std::uint32_t seed=42; seed<74 && !expeditionStunned; ++seed)
+                expeditionStunned=stun(Game(seed, true), kind);
+            Check(expeditionStunned, "No safe expedition shot at patrol kind " + std::to_string(static_cast<int>(kind)));
+        }
     });
     test("power-ups apply life, time and temporary shield", [] {
         for (Power power : {Power::Heart, Power::Time, Power::Shield})

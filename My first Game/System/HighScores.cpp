@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <memory>
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -12,15 +13,31 @@
 
 namespace MyGame
 {
+    namespace
+    {
+        std::string Environment(const char* name)
+        {
+#if defined(_MSC_VER)
+            char* value=nullptr;
+            std::size_t length=0;
+            if(_dupenv_s(&value,&length,name)!=0) return {};
+            const std::unique_ptr<char,decltype(&std::free)> owned(value,&std::free);
+            return owned ? owned.get() : "";
+#else
+            const char* value=std::getenv(name);
+            return value ? value : "";
+#endif
+        }
+    }
     std::string HighScores::DefaultPath()
     {
 #if defined(_WIN32)
-        const char* directory=std::getenv("LOCALAPPDATA");
-        if(!directory) directory=std::getenv("USERPROFILE");
+        std::string directory=Environment("LOCALAPPDATA");
+        if(directory.empty()) directory=Environment("USERPROFILE");
 #else
-        const char* directory=std::getenv("HOME");
+        const std::string directory=Environment("HOME");
 #endif
-        return std::string(directory && *directory ? directory : ".")+"/.ea-workshop-highscores";
+        return (directory.empty() ? "." : directory)+"/.ea-workshop-highscores";
     }
     HighScores::HighScores(const std::string& path) : file(path)
     {
