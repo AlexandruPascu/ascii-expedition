@@ -13,7 +13,7 @@ namespace MyGame
 			SPRE_DREAPTA
 		};
 
-		Personaj() : mOrientare(SPRE_STANGA), mPosX(0), mPosY(0) {}
+		Personaj() : mPosX(0), mPosY(0), mOrientare(SPRE_STANGA) {}
 
 		const Shape& GetShape() const
 		{

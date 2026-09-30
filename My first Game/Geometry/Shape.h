@@ -7,6 +7,7 @@ namespace MyGame
 	class Shape
 	{
 	public:
+		virtual ~Shape() = default;
 		virtual void FillPixels(PixelMatrix & output) const = 0;
 
 		virtual int GetWidth() const = 0;

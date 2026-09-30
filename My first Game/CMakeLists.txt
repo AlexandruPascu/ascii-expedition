@@ -1,33 +1,76 @@
-cmake_minimum_required (VERSION 3.0)
-project (MyFirstGame)
+cmake_minimum_required(VERSION 3.20)
+project(EAWorkshopGame LANGUAGES CXX)
 
-file (GLOB include_dirs
-	"."
-	".."
-)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+option(EA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(EA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(EA_REQUIRE_INTEGRATION_TESTS "Require Python for command-line and terminal tests" OFF)
 
-file (GLOB source_files
-	"MyFirstGame.cpp"
-	"*/*.h"
-	"*/*.cpp"
-)
+add_library(game_rules Model/Game.cpp Model/Level.cpp)
+target_include_directories(game_rules PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+add_library(game_scores System/HighScores.cpp)
+target_link_libraries(game_scores PUBLIC game_rules)
+find_package(Threads REQUIRED)
+add_executable(MyFirstGame MyFirstGame.cpp System/TermScreen.cpp System/Views.cpp)
+target_link_libraries(MyFirstGame PRIVATE game_scores Threads::Threads)
+set(game_targets game_rules game_scores MyFirstGame)
 
-#	"Geometry/*/*.h"	
-#	"Geometry/*/*.cpp"	
-#	"System/*/*.h"	
-#	"System/*/*.cpp"	
-#	"Model/*/*.h"	
-#	"Model/*/*.cpp"	
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(game_tests tests/GameTests.cpp)
+    target_link_libraries(game_tests PRIVATE game_rules)
+    add_test(NAME game_rules COMMAND game_tests)
 
-if (UNIX)
-	SET(CXX_COMPILE_FLAGS "-Wall -Wextra -std=c++11")
-endif (UNIX)
+    add_executable(input_tests tests/InputTests.cpp)
+    target_include_directories(input_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME input_decoding COMMAND input_tests)
 
-if (MSVC)
-	SET(CXX_COMPILE_FLAGS "/Wall /std=c++11")
-endif (MSVC)
+    add_executable(score_tests tests/ScoreTests.cpp)
+    target_link_libraries(score_tests PRIVATE game_scores)
+    add_test(NAME score_persistence COMMAND score_tests "${CMAKE_CURRENT_BINARY_DIR}/test-highscores")
+    list(APPEND game_targets game_tests input_tests score_tests)
 
-SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} ${CXX_COMPILE_FLAGS}")
+    if(EA_REQUIRE_INTEGRATION_TESTS)
+        find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
+    else()
+        find_package(Python3 3.8 QUIET COMPONENTS Interpreter)
+    endif()
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME command_line COMMAND "${Python3_EXECUTABLE}"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_tests.py" "$<TARGET_FILE:MyFirstGame>")
+        if(UNIX)
+            add_executable(terminal_routes tests/TerminalRoutes.cpp)
+            target_link_libraries(terminal_routes PRIVATE game_rules)
+            list(APPEND game_targets terminal_routes)
+            add_test(NAME terminal_integration COMMAND "${Python3_EXECUTABLE}"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/terminal_tests.py"
+                     "$<TARGET_FILE:MyFirstGame>" "$<TARGET_FILE:terminal_routes>")
+            set_tests_properties(terminal_integration PROPERTIES TIMEOUT 90)
+        endif()
+    else()
+        message(STATUS "Python 3.8+ not found; command-line and terminal tests are unavailable")
+    endif()
+endif()
 
-add_executable (MyFirstGame ${source_files})
-target_include_directories(MyFirstGame PRIVATE ".")
+if(EA_ENABLE_SANITIZERS AND (NOT UNIX OR NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
+    message(FATAL_ERROR "Sanitizers require GCC or Clang on a Unix platform")
+endif()
+foreach(target IN LISTS game_targets)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+        if(EA_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+        if(EA_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
+    endif()
+    if(EA_ENABLE_SANITIZERS)
+        target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+    endif()
+endforeach()

@@ -1,53 +1,77 @@
 #pragma once
 
-#if defined(_WIN32) || defined(_WIN64)
-
+#include "KeyDecoder.h"
+#include <stdexcept>
+#if defined(_WIN32)
 #include <conio.h>
-
-bool _getch_non_blocking(char & out)
-{
-	if (_kbhit())
-	{
-		out = _getch();
-		return true;
-	}
-
-	return false;
-}
-
+#include <io.h>
 #else
-
 #include <termios.h>
 #include <unistd.h>
-#include <stdio.h>
-
-bool _getch_non_blocking(char & out)
-{
-	char buf = 0;
-	struct termios old = { 0 };
-	fflush(stdout);
-	if (tcgetattr(0, &old) < 0)
-		perror("tcsetattr()");
-	old.c_lflag &= ~ICANON;
-	old.c_lflag &= ~ECHO;
-	old.c_cc[VMIN] = 0;
-	old.c_cc[VTIME] = 0;
-	if (tcsetattr(0, TCSANOW, &old) < 0)
-		perror("tcsetattr ICANON");
-	int readVal = read(0, &buf, 1);
-	if (readVal < 0)
-		perror("read()");
-	else if (readVal > 0)
-	{
-		out = buf;
-	}
-
-	old.c_lflag |= ICANON;
-	old.c_lflag |= ECHO;
-	if (tcsetattr(0, TCSADRAIN, &old) < 0)
-		perror("tcsetattr ~ICANON");
-	//printf("%c\n",buf);
-	return readVal > 0;
-}
-
+#include <cerrno>
 #endif
+
+namespace MyGame
+{
+    // Configure the terminal once and restore the exact original state on exit.
+    class KeyboardInput
+    {
+        KeyDecoder decoder;
+#if defined(_WIN32)
+        bool extendedKey = false;
+#else
+        termios original;
+#endif
+    public:
+        KeyboardInput()
+        {
+#if defined(_WIN32)
+            if (!_isatty(0) || !_isatty(1)) throw std::runtime_error("Run this game in an interactive terminal.");
+#else
+            if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO) || tcgetattr(STDIN_FILENO, &original) < 0)
+                throw std::runtime_error("Run this game in an interactive terminal.");
+            termios raw = original;
+            raw.c_lflag &= ~(ICANON | ECHO);
+            raw.c_cc[VMIN] = 0;
+            raw.c_cc[VTIME] = 0;
+            if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) < 0)
+                throw std::runtime_error("Could not configure terminal input.");
+#endif
+        }
+        ~KeyboardInput()
+        {
+#if !defined(_WIN32)
+            tcsetattr(STDIN_FILENO, TCSANOW, &original);
+#endif
+        }
+        KeyboardInput(const KeyboardInput&) = delete;
+        KeyboardInput& operator=(const KeyboardInput&) = delete;
+
+        bool Read(char& key)
+        {
+            // Bound raw byte processing as well as the main loop's command count.
+            for (int count = 0; count < 32; ++count)
+            {
+                unsigned char byte;
+#if defined(_WIN32)
+                if (!_kbhit()) return false;
+                byte = static_cast<unsigned char>(_getch());
+                if (extendedKey)
+                {
+                    extendedKey = false;
+                    if (KeyDecoder::WindowsArrow(byte, key)) return true;
+                    continue;
+                }
+                if (byte == 0 || byte == 224) { extendedKey = true; continue; }
+#else
+                const ssize_t countRead = read(STDIN_FILENO, &byte, 1);
+                if (countRead < 0 && errno != EINTR && errno != EAGAIN)
+                    throw std::runtime_error("Could not read terminal input.");
+                if (countRead <= 0) return false;
+#endif
+                if (decoder.Feed(byte, key)) return true;
+            }
+            return false;
+        }
+    };
+}

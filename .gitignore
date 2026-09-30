@@ -1,0 +1,5 @@
+/build*/
+/.cache/
+/.ea-workshop-highscores*
+__pycache__/
+*.pyc
