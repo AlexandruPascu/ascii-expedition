@@ -1,4 +1,6 @@
 #include "Agent.h"
+#include "Policy.h"
+#include <stdexcept>
 #include <algorithm>
 #include <exception>
 #include <string>
@@ -10,11 +12,32 @@
 namespace { thread_local std::string error, frame; }
 // Every throwing entry point catches C++ exceptions before crossing the C ABI.
 extern "C" {
-EXPORT int ae_version() { return 1; }
+EXPORT int ae_version() { return 2; }
 EXPORT const char* ae_error() { return error.c_str(); }
 EXPORT void* ae_create(unsigned int seed) {
     try { error.clear(); return new MyGame::AI::Episode(seed); }
     catch(const std::exception& e) { error=e.what(); return nullptr; }
+}
+EXPORT void* ae_create_options(unsigned int seed,int difficulty,int tutorial) {
+    try {
+        if(difficulty<0 || difficulty>2 || (tutorial!=0 && tutorial!=1)) throw std::invalid_argument("Invalid episode settings");
+        return new MyGame::AI::Episode(seed,tutorial==0,static_cast<MyGame::Difficulty>(difficulty));
+    } catch(const std::exception& e) { error=e.what(); return nullptr; }
+}
+EXPORT int ae_next(void* p) {
+    try { static_cast<MyGame::AI::Episode*>(p)->NextLevel(); return 0; }
+    catch(const std::exception& e) { error=e.what(); return -1; }
+}
+EXPORT int ae_stage(void* p) { return static_cast<MyGame::AI::Episode*>(p)->Rules().Stage(); }
+EXPORT int ae_policy(int kind,const float* input,double* output) {
+    try {
+        if(kind<0 || kind>1) throw std::invalid_argument("Invalid policy kind");
+        std::array<float,MyGame::AI::ObservationSize> observation;
+        std::copy(input,input+observation.size(),observation.begin());
+        const auto scores=MyGame::AI::Scores(kind==0 ? MyGame::AI::Kind::Cem:MyGame::AI::Kind::Ppo,observation);
+        std::copy(scores.begin(),scores.end(),output);
+        return static_cast<int>(std::max_element(scores.begin(),scores.end())-scores.begin());
+    } catch(const std::exception& e) { error=e.what(); return -1; }
 }
 EXPORT void ae_destroy(void* p) { delete static_cast<MyGame::AI::Episode*>(p); }
 EXPORT int ae_observe(void* p,float* output) {

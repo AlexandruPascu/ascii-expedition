@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "observation_features": [
+    "distance",
+    "star",
+    "crate",
+    "heart",
+    "time",
+    "speed",
+    "shield",
+    "exit",
+    "nearby_stars",
+    "exit_distance",
+    "deadline_fraction",
+    "remaining_stars"
+  ],
+  "actions": [
+    "nearest star",
+    "clustered stars",
+    "farthest star",
+    "crate",
+    "heart",
+    "time bonus",
+    "speed boost",
+    "shield",
+    "exit"
+  ],
+  "layers": [
+    108,
+    64,
+    64,
+    9
+  ],
+  "activation": "tanh",
+  "selection": "argmax",
+  "sources": {
+    "cem.json": "5bbe9c40bbfab712b7938e0b6d01889fe7443f446c0d583ac79da6d1b192add0",
+    "ppo.zip": "98fa8174767bf8cee51f94e53f0c377013d6c63a19cbce7cac1a76e8b93cbff3"
+  },
+  "exports": {
+    "PolicyData.h": "5f61a90bd4f4cb0697fee4e7a7fd3c0a261b0d9c5e5f954dc42fe5632d72a452"
+  }
+}

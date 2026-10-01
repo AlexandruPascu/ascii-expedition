@@ -79,7 +79,7 @@ namespace MyGame
     bool HighScores::Record(const Game& game)
     {
         ScoreEntry& entry=entries[Index(game.Mode(),game.SkipsTutorial())];
-        if(game.Score()>entry.score)
+        if(!game.Assisted() && game.Score()>entry.score)
         {
             entry.score=game.Score(); entry.seed=game.Seed();
             dirty=true;

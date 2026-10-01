@@ -30,9 +30,15 @@ def library(path=None):
     if path in _libraries:
         return _libraries[path]
     lib = C.CDLL(path)
+    lib.ae_version.argtypes, lib.ae_version.restype = [], C.c_int
+    if lib.ae_version() != 2:
+        raise RuntimeError('Incompatible AI library; rebuild this checkout.')
     signatures = {
         'ae_version': ([], C.c_int), 'ae_error': ([], C.c_char_p),
-        'ae_create': ([C.c_uint], C.c_void_p), 'ae_destroy': ([C.c_void_p], None),
+        'ae_create': ([C.c_uint], C.c_void_p),
+        'ae_create_options': ([C.c_uint, C.c_int, C.c_int], C.c_void_p),
+        'ae_next': ([C.c_void_p], C.c_int), 'ae_stage': ([C.c_void_p], C.c_int),
+        'ae_policy': ([C.c_int, C.POINTER(C.c_float), C.POINTER(C.c_double)], C.c_int), 'ae_destroy': ([C.c_void_p], None),
         'ae_observe': ([C.c_void_p, C.POINTER(C.c_float)], C.c_int),
         'ae_step': ([C.c_void_p, C.c_int], C.c_int),
         'ae_begin': ([C.c_void_p, C.c_int], C.c_int), 'ae_tick': ([C.c_void_p], C.c_int),
@@ -42,18 +48,19 @@ def library(path=None):
     for name, (args, result) in signatures.items():
         function = getattr(lib, name)
         function.argtypes, function.restype = args, result
-    if lib.ae_version() != 1:
-        raise RuntimeError('Incompatible AI library; rebuild this checkout.')
     _libraries[path] = lib
     return lib
 
 
 class Episode:
-    def __init__(self, seed, path=None):
+    def __init__(self, seed, path=None, *, difficulty='normal', tutorial=False):
         if not isinstance(seed, int) or not 0 <= seed <= 0xffffffff:
             raise ValueError('Map seed must be an unsigned 32-bit integer')
+        modes = ('relaxed', 'normal', 'hard')
+        if difficulty not in modes:
+            raise ValueError('Difficulty must be relaxed, normal or hard')
         self.lib = library(path)
-        self.handle = self.lib.ae_create(seed)
+        self.handle = self.lib.ae_create_options(seed, modes.index(difficulty), int(bool(tutorial)))
         if not self.handle:
             raise RuntimeError(self.lib.ae_error().decode())
         self._observation = (C.c_float * (len(ACTIONS) * len(FEATURES)))()
@@ -76,13 +83,18 @@ class Episode:
     def info(self):
         self._open()
         self.lib.ae_info(self.handle, self._info)
-        return dict(zip(INFO, self._info))
+        return dict(stage=self.lib.ae_stage(self.handle), **dict(zip(INFO, self._info)))
 
     def step(self, action):
         self._open()
         if not 0 <= int(action) < len(ACTIONS):
             raise ValueError('Action must be between 0 and 8')
         self._check(self.lib.ae_step(self.handle, int(action)))
+        return self.info()
+
+    def next_level(self):
+        self._open()
+        self._check(self.lib.ae_next(self.handle))
         return self.info()
 
     def frames(self, action):
@@ -137,3 +149,20 @@ def rollout(seed, policy):
         while not episode.info()['done']:
             episode.step(policy(episode.observe()))
         return dict(seed=seed, **episode.info())
+
+
+def native_scores(observation, agent):
+    if agent not in ('cem', 'ppo') or len(observation) != len(ACTIONS) * len(FEATURES):
+        raise ValueError('Expected a CEM/PPO agent and 108 observation values')
+    lib = library()
+    values = (C.c_float * len(observation))(*observation)
+    scores = (C.c_double * len(ACTIONS))()
+    result = lib.ae_policy(('cem', 'ppo').index(agent), values, scores)
+    if result < 0:
+        raise RuntimeError(lib.ae_error().decode())
+    return list(scores)
+
+
+def native_action(observation, agent):
+    scores = native_scores(observation, agent)
+    return max(range(len(ACTIONS)), key=scores.__getitem__)

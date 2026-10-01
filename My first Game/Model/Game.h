@@ -49,6 +49,8 @@ namespace MyGame
         Difficulty Mode() const { return difficulty; }
         bool SkipsTutorial() const { return firstStage != 0; }
         bool Timed() const { return !Tutorial() && RulesFor(difficulty).durationMillis > 0; }
+        bool Assisted() const { return assisted; }
+        void MarkAssisted() { assisted=true; }
         const RunStats& Stats() const { return stats; }
         const std::vector<Feedback>& Messages() const { return feedback; }
         bool HitFlash() const { return hitFlashMillis > 0; }
@@ -69,8 +71,10 @@ namespace MyGame
         Level level;
         std::vector<Point> beam;
         State state;
+        State beforePause=State::Playing;
         Difficulty difficulty;
         RunStats stats;
+        bool assisted=false;
         std::vector<Feedback> feedback;
         int hitFlashMillis;
         std::uint32_t seed;

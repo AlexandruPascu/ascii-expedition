@@ -3,11 +3,11 @@ import os, pty, re, select, signal, struct, subprocess, sys, tempfile, termios, 
 from pathlib import Path
 ansi=re.compile(rb'\x1b\[[0-?]*[ -/]*[@-~]')
 class Terminal:
-    def __init__(self,executable,args,size=(40,100)):
+    def __init__(self,executable,args,size=(40,100),cwd=None):
         self.master,self.slave=pty.openpty()
         fcntl.ioctl(self.slave,termios.TIOCSWINSZ,struct.pack('HHHH',*size,0,0))
         self.original=termios.tcgetattr(self.slave)
-        self.proc=subprocess.Popen([str(executable),*args],stdin=self.slave,stdout=self.slave,stderr=self.slave)
+        self.proc=subprocess.Popen([str(executable),*args],stdin=self.slave,stdout=self.slave,stderr=self.slave,cwd=cwd)
         self.data=b''
         self.read(.22)
     def read(self,seconds=.13):

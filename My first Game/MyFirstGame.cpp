@@ -1,4 +1,5 @@
 #include "System/Views.h"
+#include "AI/Autopilot.h"
 #include "System/KbInput.h"
 #include <algorithm>
 #include <chrono>
@@ -20,7 +21,8 @@ int main(int argc,char** argv)
     std::signal(SIGINT,Stop); std::signal(SIGTERM,Stop);
     try
     {
-        bool skipTutorial=false,difficultyProvided=false;
+        bool skipTutorial=false,difficultyProvided=false,startAI=false;
+        MyGame::AI::Kind selectedAgent=MyGame::AI::Kind::Cem;
         MyGame::Difficulty selected=MyGame::Difficulty::Normal;
         std::uint32_t seed=std::random_device{}();
         std::string scoresFile=MyGame::HighScores::DefaultPath();
@@ -30,11 +32,12 @@ int main(int argc,char** argv)
             if(arg=="--help")
             {
                 std::cout<<"Usage: MyFirstGame [--seed N] [--skip-tutorial]\n"
-                         <<"  [--difficulty relaxed|normal|hard] [--scores-file PATH]\n"
+                         <<"  [--difficulty relaxed|normal|hard] [--scores-file PATH] [--ai off|cem|ppo]\n"
                          <<"Without --difficulty, a difficulty menu opens first.\n"
                          <<"Use an ANSI terminal at least 80 columns by 37 rows.\n"
                          <<"Arrows/WASD move; Shift+WASD precise steps; F/Space fire;\n"
-                         <<"H/? guide; P pause; Enter next stage; R replay; N new run; M menu; Q quit.\n";
+                         <<"H/? guide; P pause; Enter next stage; R replay; N new run; M menu; Q quit.\n"
+                         <<"I: toggle autopilot; O: switch CEM/PPO; moving/firing takes manual control.\n";
                 return 0;
             }
             if(arg=="--skip-tutorial") skipTutorial=true;
@@ -56,6 +59,13 @@ int main(int argc,char** argv)
                 else throw std::runtime_error("Difficulty must be relaxed, normal, or hard.");
                 difficultyProvided=true;
             }
+            else if(arg=="--ai" && i+1<argc)
+            {
+                const std::string value=argv[++i];
+                if(value!="off" && value!="cem" && value!="ppo") throw std::runtime_error("AI must be off, cem, or ppo.");
+                startAI=value!="off";
+                selectedAgent=value=="ppo" ? MyGame::AI::Kind::Ppo:MyGame::AI::Kind::Cem;
+            }
             else if(arg=="--scores-file" && i+1<argc)
             {
                 scoresFile=argv[++i];
@@ -65,10 +75,16 @@ int main(int argc,char** argv)
         }
         MyGame::HighScores scores(scoresFile);
         std::unique_ptr<MyGame::Game> game;
+        std::unique_ptr<MyGame::AI::Autopilot> pilot;
         bool menu=!difficultyProvided, stageRecorded=false;
         bool helpOpen=false, resumeAfterHelp=false;
         std::string summary;
-        auto begin=[&] { game.reset(new MyGame::Game(seed,skipTutorial,selected)); menu=false; stageRecorded=false; };
+        auto begin=[&] {
+            pilot.reset(); game.reset(new MyGame::Game(seed,skipTutorial,selected));
+            pilot.reset(new MyGame::AI::Autopilot(*game,selectedAgent,startAI));
+            menu=false; stageRecorded=false;
+        };
+        auto takeOver=[&] { pilot->Enable(false); startAI=false; };
         auto record=[&] { if(game) { scores.Record(*game); summary=MyGame::RunSummary(*game,scores); } };
         if(!menu) begin();
         {
@@ -85,10 +101,10 @@ int main(int argc,char** argv)
                 const MyGame::TerminalSize size=screen.Size();
                 if(!size.FitsGame())
                 {
-                    if(game && game->Status()==MyGame::Game::State::Playing) game->TogglePause();
+                    if(game && (game->Status()==MyGame::Game::State::Playing || game->Status()==MyGame::Game::State::Cleared)) game->TogglePause();
                     resumeAfterHelp=false; // Resizing requires an explicit resume after the window is usable.
                 }
-                else if(!menu && !helpOpen) game->Update(static_cast<int>(elapsed.count()));
+                else if(!menu && !helpOpen) pilot->Advance(static_cast<int>(std::min<long long>(elapsed.count(),std::numeric_limits<int>::max())));
                 char key;
                 for(int count=0;count<64 && input.Read(key);++count)
                 {
@@ -119,22 +135,28 @@ int main(int argc,char** argv)
                         else if(command=='w') selected=static_cast<MyGame::Difficulty>((static_cast<int>(selected)+2)%3);
                         else if(command=='s') selected=static_cast<MyGame::Difficulty>((static_cast<int>(selected)+1)%3);
                         else if(command=='t') skipTutorial=!skipTutorial;
+                        else if(command=='i') startAI=!startAI;
+                        else if(command=='o') selectedAgent=selectedAgent==MyGame::AI::Kind::Cem ? MyGame::AI::Kind::Ppo:MyGame::AI::Kind::Cem;
                         else if(command=='n') seed=std::random_device{}();
                         else if(command>='1' && command<='3') { selected=static_cast<MyGame::Difficulty>(command-'1'); begin(); }
                         else if(command=='\r' || command=='\n') begin();
                     }
                     else switch(command)
                     {
-                        case 'w': game->Move(0,-1,precise); break;
-                        case 'a': game->Move(-1,0,precise); break;
-                        case 's': game->Move(0,1,precise); break;
-                        case 'd': game->Move(1,0,precise); break;
-                        case 'f': case ' ': game->Fire(); break;
-                        case '\r': case '\n': game->NextLevel(); stageRecorded=false; break;
+                        case 'w': takeOver(); game->Move(0,-1,precise); break;
+                        case 'a': takeOver(); game->Move(-1,0,precise); break;
+                        case 's': takeOver(); game->Move(0,1,precise); break;
+                        case 'd': takeOver(); game->Move(1,0,precise); break;
+                        case 'f': case ' ': takeOver(); game->Fire(); break;
+                        case '\r': case '\n':
+                            if(game->Status()==MyGame::Game::State::Cleared) { game->NextLevel(); pilot->Reset(); stageRecorded=false; }
+                            break;
+                        case 'i': pilot->Enable(!pilot->Enabled()); startAI=pilot->Enabled(); break;
+                        case 'o': pilot->Switch(); selectedAgent=pilot->Selected(); break;
                         case 'p': game->TogglePause(); break;
-                        case 'r': record(); game->Reset(); stageRecorded=false; break;
-                        case 'n': record(); game->NewRun(); seed=game->Seed(); stageRecorded=false; break;
-                        case 'm': record(); seed=game->Seed(); selected=game->Mode(); skipTutorial=game->SkipsTutorial(); menu=true; game.reset(); break;
+                        case 'r': record(); game->Reset(); pilot->Reset(); stageRecorded=false; break;
+                        case 'n': record(); game->NewRun(); pilot->Reset(); seed=game->Seed(); stageRecorded=false; break;
+                        case 'm': record(); seed=game->Seed(); selected=game->Mode(); skipTutorial=game->SkipsTutorial(); menu=true; startAI=pilot->Enabled(); selectedAgent=pilot->Selected(); pilot.reset(); game.reset(); break;
                         case 'q': stopped=1; break;
                     }
                     if(stopped) break;
@@ -146,13 +168,14 @@ int main(int argc,char** argv)
                     lastNotice=size;
                 }
                 else if(helpOpen) MyGame::RenderHelp(screen);
-                else if(menu) MyGame::RenderMenu(screen,selected,skipTutorial,seed,scores);
+                else if(menu) MyGame::RenderMenu(screen,selected,skipTutorial,seed,scores,
+                    std::string("I: AI ")+(startAI ? "ON (":"OFF (")+MyGame::AI::Name(selectedAgent)+") | O: switch CEM/PPO");
                 else
                 {
                     const bool ended=game->Status()==MyGame::Game::State::Cleared || game->Status()==MyGame::Game::State::Lost;
                     if(ended && !stageRecorded) { scores.Record(*game); stageRecorded=true; }
                     if(!ended) stageRecorded=false;
-                    MyGame::RenderGame(screen,*game,scores);
+                    MyGame::RenderGame(screen,*game,scores,pilot->Status(),pilot->Enabled());
                 }
                 if(size.FitsGame()) lastNotice={0,0};
                 std::this_thread::sleep_until(now+std::chrono::milliseconds(50));

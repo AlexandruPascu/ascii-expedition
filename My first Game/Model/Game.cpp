@@ -15,6 +15,7 @@ namespace MyGame
         lives = RulesFor(difficulty).lives;
         score = 0;
         stats = RunStats{};
+        assisted = false;
         LoadLevel();
     }
 
@@ -241,7 +242,11 @@ namespace MyGame
 
     void Game::TogglePause()
     {
-        if (state == State::Playing) state = State::Paused;
-        else if (state == State::Paused) state = State::Playing;
+        if (state == State::Playing || state == State::Cleared)
+        {
+            beforePause = state;
+            state = State::Paused;
+        }
+        else if (state == State::Paused) state = beforePause;
     }
 }

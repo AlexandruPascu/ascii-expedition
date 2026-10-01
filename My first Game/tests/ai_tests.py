@@ -44,6 +44,27 @@ class BindingTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             e.observe()
 
+    def test_configured_episodes_and_progression(self):
+        for mode, lives in (('relaxed', 5), ('normal', 3), ('hard', 2)):
+            with Episode(42, difficulty=mode, tutorial=True) as episode:
+                self.assertEqual(episode.info()['stage'], 0)
+                self.assertEqual(episode.info()['lives'], lives)
+                with self.assertRaises(RuntimeError):
+                    episode.next_level()
+                for stage in range(3):
+                    while not episode.info()['done']:
+                        episode.step(0)
+                    before = episode.info()
+                    self.assertEqual(before['success'], 1)
+                    episode.next_level()
+                    after = episode.info()
+                    self.assertEqual(after['stage'], stage + 1)
+                    self.assertEqual(after['score'], before['score'])
+                    self.assertEqual(after['lives'], before['lives'])
+                    self.assertEqual(after['decisions'], 0)
+        with self.assertRaises(ValueError):
+            Episode(42, difficulty='invalid')
+
     def test_data_split(self):
         self.assertFalse(set(TRAIN_SEEDS) & set(VALIDATION_SEEDS))
         self.assertFalse(set(TRAIN_SEEDS) & set(TEST_SEEDS))

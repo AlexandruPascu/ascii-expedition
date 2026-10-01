@@ -1,10 +1,42 @@
 # Learning to play ASCII Expedition
 
-Two trained agents are included: a small **cross-entropy (CEM) weight policy** and a **PPO neural policy**. Both run against the real C++ game and choose which objective to pursue next. Shared, hand-written pathfinding moves the character and aims the blaster.
+Two trained agents are included: a small **cross-entropy (CEM) weight policy** and a **PPO neural policy**. Both are embedded in the regular C++ game and choose which objective to pursue next. Shared, hand-written pathfinding moves the character and aims the blaster.
 
-This first experiment covers **one generated expedition on Normal difficulty**, starting after the tutorials. It learns bonus collection and objective ordering. It does not learn movement, patrol evasion, or aiming from scratch, and it has not been evaluated on later stages or other difficulties.
+The original training experiment used **one generated expedition on Normal difficulty**, starting after the tutorials. The same frozen models now control the regular game and have been evaluated across both tutorials, all three difficulties, and twelve successive expeditions. They learn bonus collection and objective ordering; movement and aiming remain programmed helpers.
 
-## Watch them play
+## Play with AI in the regular game
+
+Build using the [main README](../README.md), then launch either agent:
+
+```sh
+./build/MyFirstGame --ai cem --difficulty normal --seed 42
+./build/MyFirstGame --ai ppo --difficulty hard --seed 42
+```
+
+On Windows use `.\build\Release\MyFirstGame.exe` with the same options. Both policies run entirely in C++: **no Python, PyTorch, model server, or separate viewer is needed**. Exported weights are embedded in the executable, so launching it from a different directory also works.
+
+- **I** toggles autopilot. **O** selects CEM/PPO, including during a run.
+- Arrows/WASD or F/Space immediately return control to you, without restarting or replacing the live game.
+- AI supports the two tutorials and subsequent expeditions in Relaxed, Normal, and Hard. Add `--skip-tutorial` to go straight to expeditions.
+- The usual pause, guide, resize pause, replay, new-run, menu, and quit controls remain available. AI waits on the stage-clear screen for 1.2 seconds before continuing automatically. It stops on game over.
+- Points, lives, pickups, and progress carry forward normally. Once AI has supplied input, that entire run stays **assisted** and does not overwrite your personal high scores. Restarting or beginning a new run clears the marker until AI supplies another input.
+
+The same movement controller drives training and live play. Taking over a manually positioned character inside a patrol lane adds a shortest escape route before resuming safe pathfinding; damage cancels stale plans and causes replanning from the normal respawn. Escaping an unsafe human position can still cost a life.
+
+### Extended validation
+
+The [campaign report](reports/campaign.json) and [per-stage CSV](reports/campaign.csv) cover seeds **40000–40031**, separately from the original training, validation, and test seeds. Each policy plays both tutorials and twelve expeditions, with lives and score carried between stages.
+
+| Agent | Relaxed cleared | Normal cleared | Hard cleared | Total |
+| --- | ---: | ---: | ---: | ---: |
+| CEM | 448/448 | 448/448 | 448/448 | 1,344/1,344 |
+| PPO | 448/448 | 448/448 | 448/448 | 1,344/1,344 |
+
+Neither agent took a hit in these generated-start campaigns. This exercises the game's capped later-stage patrol count/speed, crate count, and star count. It is a finite evaluation, not a guarantee for every seed or arbitrary human takeover position. The map generator and safe pathfinder supply much of the completion reliability; score optimization is what the models learned. The original training weights were retained without retraining.
+
+`python3 ai/evaluate_campaign.py` reproduces the campaign evaluation using embedded inference and only Python's standard library. `python ai/policy_tests.py` uses the optional ML environment to compare native and Python policy decisions across 336 stages (5,231 decisions in the recorded run), with a numerical tolerance for PPO logits. Native unit tests separately exercise 672 stages, frame timing, handovers, agent switching, unsafe-lane escape, respawn recovery, and personal-score isolation. Terminal tests play the actual executable through tutorials and expeditions with both agents.
+
+## Optional Python viewer
 
 Build the game using the [main README](../README.md), then run from the repository root:
 
@@ -16,7 +48,7 @@ python3 ai/watch.py --agent nearest --seed 42
 
 Use a terminal at least **80 columns by 33 rows**. Playback defaults to 2× speed; `--speed 1` uses real time. **Ctrl+C** stops playback and restores the terminal. The AI viewer has its own display and does not write to human high scores. Choose another `--seed` to generate a different map. `--headless` prints just the result.
 
-For PPO, install the optional Python dependencies first. The recorded experiment used **Python 3.12**, CPU PyTorch 2.14.1, Gymnasium 1.3.0, and Stable Baselines3 2.9.0:
+For PPO in the **Python viewer**, or for training/exporting models, install the optional Python dependencies first. The recorded experiment used **Python 3.12**, CPU PyTorch 2.14.1, Gymnasium 1.3.0, and Stable Baselines3 2.9.0:
 
 ```sh
 python3 -m venv .venv
@@ -76,7 +108,7 @@ Each of the nine targets has 12 features, giving a flat **108-value observation*
 | `shield`, `exit` | Target-type indicators |
 | `nearby_stars` | Uncollected stars within Manhattan distance 16 of the target / 6 |
 | `exit_distance` | Manhattan distance from the target to the exit / 100 |
-| `deadline_fraction` | Route length / (10 × remaining seconds) |
+| `deadline_fraction` | Route length / (10 × remaining seconds); zero in untimed stages |
 | `remaining_stars` | Number of remaining stars / 6 |
 
 The policy receives no map seed, RNG state, hidden crate drops, or hidden crate reward amount. It sees engineered objective features, not pixels or raw keypresses. `remaining_stars` is the same for every candidate, so its coefficient cancels in CEM's linear ranking; PPO can use it as context.
@@ -109,7 +141,8 @@ These commands replace the corresponding model files and benchmark report. To ke
 
 ## Checks and implementation
 
-- `My first Game/AI/Agent.*` implements native skills, pathfinding, observations, fixed-time simulation, and replay frames. It calls the existing `Game` methods without rewriting the rules.
+- `My first Game/AI/Agent.*` implements a controller attached to an existing `Game`, plus the training episode wrapper, skills, observations, fixed-time simulation, and replay frames.
+- `My first Game/AI/Policy.*` evaluates the embedded CEM vector or PPO actor. `Autopilot.*` supplies live input timing, switching, handover, and stage advancement.
 - `My first Game/AI/Bridge.cpp` exports a versioned C interface, loaded through Python's standard-library `ctypes`.
 - `native.py` provides native episodes and CEM policy loading; `environment.py` adapts episodes to Gymnasium.
 - `train_cem.py`, `train_ppo.py`, `evaluate.py`, and `watch.py` train, compare, and play back the agents.
@@ -123,3 +156,17 @@ The standard game and CEM have no PyTorch dependency. The optional learning CI j
 If headless PPO succeeds but playback crashes while rendering the first frame, check the native library with `ldd build/libexpedition_ai.so`. This project encountered that failure with an extracted GCC installation whose `libstdc++.so` symlink was broken: the linker embedded a static C++ runtime while PyTorch loaded the shared runtime. Repairing the compiler's shared-runtime link and rebuilding resolved the conflict. A normal shared-runtime build lists `libstdc++.so.6` in `ldd` output.
 
 After repairing that compiler installation, rebuild with `cmake --build build --clean-first --parallel 2` and run `python ai/smoke_test.py` using the PPO environment. The smoke check includes actual rendering and terminal playback; a `--headless` run alone cannot validate that path.
+
+### Exporting updated models into the game
+
+`ai/models/native/PolicyData.h` contains the exported CEM vector and PPO actor (108 inputs, two 64-unit tanh layers, nine logits). The critic is only needed for training and is not included. C++ selects the largest logit; it does not approximate the network with hand-written weights. The [export manifest](models/native/manifest.json) records source and generated-file hashes.
+
+After intentionally replacing the trained models in `ai/models/`, use the optional ML environment to export and rebuild:
+
+```sh
+python ai/export_policies.py
+cmake --build build --config Release --parallel 2
+python ai/policy_tests.py
+```
+
+Commit the generated header and manifest with the updated source models. Normal builds consume the committed export directly and never invoke Python or download dependencies.

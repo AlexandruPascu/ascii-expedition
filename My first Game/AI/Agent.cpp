@@ -14,35 +14,57 @@ Point Position(int c) { return {c%Game::Width,c/Game::Width}; }
 int Manhattan(Point a,Point b) { return std::abs(a.x-b.x)+std::abs(a.y-b.y); }
 struct Routes {
     std::array<int,Cells> previous, distance;
-    std::array<bool,Cells> blocked{};
+    std::array<bool,Cells> blocked{},danger{};
     explicit Routes(const Game& g) {
         previous.fill(-1); distance.fill(-1);
         // Expand obstacles by the player's 3x3 collision footprint once per decision.
-        auto block=[&](const Stone& s) {
+        auto block=[&](const Stone& s,std::array<bool,Cells>& cells) {
             for(int y=std::max(0,s.GetY()-2);y<std::min<int>(Game::Height,s.GetY()+s.GetShape().GetHeight());++y)
                 for(int x=std::max(0,s.GetX()-2);x<std::min<int>(Game::Width,s.GetX()+s.GetShape().GetWidth());++x)
-                    blocked[y*Game::Width+x]=true;
+                    cells[y*Game::Width+x]=true;
         };
-        for(const auto& w:g.Walls()) block(w);
-        for(const auto& c:g.Crates()) if(c.health>0) block(c.body);
-        for(const auto& h:g.Hazards()) block(h.DangerBounds());
+        for(const auto& w:g.Walls()) block(w,blocked);
+        for(const auto& c:g.Crates()) if(c.health>0) block(c.body,blocked);
+        for(const auto& h:g.Hazards()) block(h.DangerBounds(),danger);
         const int start=Cell({g.Player().GetX(),g.Player().GetY()});
         std::array<int,Cells> queue{};
-        int front=0,back=0; queue[back++]=start; previous[start]=start; distance[start]=0;
+        int front=0,back=0,origin=start;
+        previous[start]=start; distance[start]=0;
+        if(danger[start]) {
+            std::array<int,Cells> escape;
+            escape.fill(-1); escape[start]=start; queue[back++]=start;
+            while(front<back) {
+                const int c=queue[front++]; const Point p=Position(c);
+                if(!danger[c]) { origin=c; break; }
+                for(Point d:Directions) {
+                    const Point q{p.x+d.x,p.y+d.y};
+                    if(q.x<1 || q.y<1 || q.x>Game::Width-4 || q.y>Game::Height-4) continue;
+                    const int n=Cell(q);
+                    if(blocked[n] || escape[n]!=-1) continue;
+                    escape[n]=c; queue[back++]=n;
+                }
+            }
+            if(origin==start) throw std::runtime_error("No route out of this patrol area");
+            std::vector<int> prefix;
+            for(int c=origin;c!=start;c=escape[c]) prefix.push_back(c);
+            std::reverse(prefix.begin(),prefix.end());
+            for(int c:prefix) { previous[c]=escape[c]; distance[c]=distance[escape[c]]+1; }
+        }
+        front=back=0; queue[back++]=origin;
         while(front<back) {
             const int c=queue[front++]; const Point p=Position(c);
             for(Point d:Directions) {
                 const Point q{p.x+d.x,p.y+d.y};
                 if(q.x<1 || q.y<1 || q.x>Game::Width-4 || q.y>Game::Height-4) continue;
                 const int n=Cell(q);
-                if(blocked[n] || previous[n]!=-1) continue;
+                if(blocked[n] || danger[n] || previous[n]!=-1) continue;
                 previous[n]=c; distance[n]=distance[c]+1; queue[back++]=n;
             }
         }
     }
     int Distance(Point p) const {
         if(p.x<0 || p.y<0 || p.x>=Game::Width || p.y>=Game::Height) return -1;
-        return distance[Cell(p)];
+        return danger[Cell(p)] ? -1 : distance[Cell(p)];
     }
     std::vector<Point> Path(Point p) const {
         std::vector<Point> result;
@@ -51,7 +73,7 @@ struct Routes {
     }
 };
 }
-bool Episode::Reached(const Plan& p) const {
+bool Controller::Reached(const Plan& p) const {
     switch(p.kind) {
         case Plan::Star: return game.Coins()[static_cast<std::size_t>(p.index)].collected;
         case Plan::Box: return game.Crates()[static_cast<std::size_t>(p.index)].health<=0;
@@ -59,9 +81,9 @@ bool Episode::Reached(const Plan& p) const {
         default: return game.Pickups()[static_cast<std::size_t>(p.index)].collected;
     }
 }
-void Episode::Prepare() {
+void Controller::Prepare() {
     observation.fill(0);
-    if(Done()) { ready=true; return; }
+    if(game.Status()!=Game::State::Playing) { ready=true; return; }
     const Routes routes(game);
     std::vector<Plan> options;
     auto add=[&](Plan::Kind kind,int index,Point object,int width,int height) {
@@ -90,7 +112,7 @@ void Episode::Prepare() {
         p.features[7]=kind==Plan::Exit ? 1.0f:0.0f;
         for(const auto& c:game.Coins()) if(!c.collected && Manhattan(p.target,{c.x,c.y})<=16) p.features[8]+=1.0f/6.0f;
         p.features[9]=static_cast<float>(Manhattan(p.target,{game.Exit().GetX(),game.Exit().GetY()}))/100.0f;
-        p.features[10]=static_cast<float>(best)/(10.0f*static_cast<float>(std::max(1,game.SecondsLeft())));
+        p.features[10]=game.Timed() ? static_cast<float>(best)/(10.0f*static_cast<float>(std::max(1,game.SecondsLeft()))) : 0.0f;
         p.features[11]=static_cast<float>(game.Coins().size()-game.Collected())/6.0f;
         options.push_back(p);
     };
@@ -130,15 +152,18 @@ void Episode::Prepare() {
     for(int a=0;a<Actions;++a) for(int f=0;f<Features;++f) observation[a*Features+f]=plans[a].features[f];
     ready=true;
 }
-const std::array<float,ObservationSize>& Episode::Observe() { if(!ready) Prepare(); return observation; }
-void Episode::Begin(int action) {
+const std::array<float,ObservationSize>& Controller::Observe() { if(!ready) Prepare(); return observation; }
+void Controller::Begin(int action) {
     if(action<0 || action>=Actions) throw std::invalid_argument("AI action must be between 0 and 8");
     if(active) throw std::logic_error("Finish the active skill before choosing another");
-    if(Done()) throw std::logic_error("Reset after an episode ends");
+    if(game.Status()!=Game::State::Playing) throw std::logic_error("The game must be playing before choosing a skill");
     Observe(); current=plans[action]; pathIndex=0; skillTicks=0; active=true; ready=false; ++decisions;
 }
-bool Episode::Tick() {
+bool Controller::Tick() {
     if(!active) return false;
+    if(game.Status()==Game::State::Paused) return true;
+    if(game.Status()!=Game::State::Playing) { active=false; ready=false; return false; }
+    game.MarkAssisted();
     const int hits=game.Stats().hits;
     if(pathIndex<current.path.size() && !Reached(current)) {
         Point p{game.Player().GetX(),game.Player().GetY()},next=current.path[pathIndex];
@@ -160,7 +185,19 @@ bool Episode::Tick() {
     if(!active) ready=false;
     return active;
 }
+void Controller::Reset() {
+    ready=active=false; pathIndex=0; decisions=skillTicks=0;
+    current=Plan{}; observation.fill(0);
+}
+void Episode::Begin(int action) {
+    if(Done()) throw std::logic_error("Reset after an episode ends");
+    controller.Begin(action);
+}
 void Episode::Step(int action) { Begin(action); while(Tick()) {} }
+void Episode::NextLevel() {
+    if(game.Status()!=Game::State::Cleared) throw std::logic_error("Clear the current stage first");
+    game.NextLevel(); controller.Reset();
+}
 std::string Episode::Render() const {
     std::vector<std::string> rows(Game::Height,std::string(Game::Width,' '));
     auto put=[&](int x,int y,char c) { if(x>=0 && y>=0 && x<Game::Width && y<Game::Height) rows[y][x]=c; };

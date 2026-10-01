@@ -26,9 +26,13 @@ def main():
             assert result.returncode != 0 and "Seed must be an integer" in result.stderr, seed
         for mode in ("relaxed", "normal", "hard"):
             assert run("--difficulty", mode, "--help").returncode == 0
+        for agent in ("off", "cem", "ppo"):
+            assert run("--ai", agent, "--help").returncode == 0
+        result = run("--ai", "unknown")
+        assert result.returncode != 0 and "AI must be off, cem, or ppo" in result.stderr
         result = run("--difficulty", "impossible")
         assert result.returncode != 0 and "Difficulty must be" in result.stderr
-        for argument in ("--seed", "--difficulty", "--scores-file", "--unknown"):
+        for argument in ("--seed", "--difficulty", "--scores-file", "--ai", "--unknown"):
             result = run(argument)
             assert result.returncode != 0 and "Unknown or incomplete option" in result.stderr, argument
         result = run("--scores-file", "")

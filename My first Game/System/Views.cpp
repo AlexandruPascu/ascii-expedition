@@ -21,7 +21,7 @@ namespace MyGame
         {
             return tone==FeedbackTone::Danger ? Color::Red:tone==FeedbackTone::Reward ? Color::Green:Color::Yellow;
         }
-        void SummaryPanel(TerminalScreen& screen,const Game& game,const HighScores& scores)
+        void SummaryPanel(TerminalScreen& screen,const Game& game,const HighScores& scores,bool autoPlaying)
         {
             const RunStats& stats=game.Stats();
             const bool cleared=game.Status()==Game::State::Cleared;
@@ -35,12 +35,13 @@ namespace MyGame
             screen.Text(13,14,"Hits taken: "+std::to_string(stats.hits)+"    Patrols stunned: "+std::to_string(stats.stuns));
             screen.Text(13,15,"Active time: "+Clock(stats.elapsedMillis)+"    Lives: "+std::to_string(game.Lives()));
             screen.Text(13,17,"Seed: "+std::to_string(game.Seed())+(game.SkipsTutorial() ? " | Direct expedition":" | With tutorial"),Color::Cyan);
-            screen.Text(13,19,cleared ? "ENTER: next stage, keep your lives and points":"R: replay this seed   N: new random run");
+            screen.Text(13,19,cleared ? (autoPlaying ? "AI continues shortly | I: take over":"ENTER: next stage, keep your lives and points"):"R: replay this seed   N: new random run");
             screen.Text(13,20,cleared ? "R: replay   N: new run   M: menu   Q: quit":"M: difficulty menu   Q: quit",Color::Dim);
+            if(game.Assisted()) screen.Text(13,21,"AI-assisted: personal best is not saved.",Color::Cyan);
             if(!scores.Error().empty()) screen.Text(13,22,scores.Error().substr(0,54),Color::Yellow);
         }
     }
-    void RenderMenu(TerminalScreen& screen,Difficulty selected,bool skipTutorial,std::uint32_t seed,const HighScores& scores)
+    void RenderMenu(TerminalScreen& screen,Difficulty selected,bool skipTutorial,std::uint32_t seed,const HighScores& scores,const std::string& aiStatus)
     {
         screen.Clear();
         Panel(screen,5,3,70,29,Color::Cyan);
@@ -58,10 +59,11 @@ namespace MyGame
         screen.Text(9,23,"Seed: "+std::to_string(seed),Color::Cyan);
         screen.Text(9,25,"Arrows/W/S choose | ENTER starts | 1/2/3 quick start");
         screen.Text(9,27,"T tutorial | N seed | H/? help | Q quit",Color::Dim);
+        screen.Text(9,28,aiStatus,Color::Cyan);
         if(!scores.Error().empty()) screen.Text(9,29,scores.Error().substr(0,62),Color::Yellow);
         screen.Present();
     }
-    void RenderGame(TerminalScreen& screen,const Game& game,const HighScores& scores)
+    void RenderGame(TerminalScreen& screen,const Game& game,const HighScores& scores,const std::string& aiStatus,bool autoPlaying)
     {
         screen.Clear();
         Panel(screen,0,0,Game::Width,Game::Height,game.HitFlash() ? Color::Red:Color::Blue);
@@ -120,7 +122,9 @@ namespace MyGame
         if(messages.size()>1 && game.Status()!=Game::State::Paused)
             screen.Text(0,36,messages[messages.size()-2].text,Tone(messages[messages.size()-2].tone));
         else screen.Text(0,36,game.SpeedBoosted() ? "Shift+WASD: precise steps | B speed | S shield | + life | T time":"C crates: two shots, bonus loot | B speed | S shield | + life | T time",Color::Dim);
-        if(game.Status()==Game::State::Cleared || game.Status()==Game::State::Lost) SummaryPanel(screen,game,scores);
+        if(!aiStatus.empty()) screen.Text(0,36,std::string(80,' '),Color::Dim);
+        if(!aiStatus.empty()) screen.Text(0,36,aiStatus,Color::Cyan);
+        if(game.Status()==Game::State::Cleared || game.Status()==Game::State::Lost) SummaryPanel(screen,game,scores,autoPlaying);
         if(game.Status()==Game::State::Paused)
         {
             Panel(screen,14,9,52,11,Color::Cyan);
@@ -157,6 +161,7 @@ namespace MyGame
         screen.Text(8,27,"Sentries warn with yellow dots, then pulse red ! marks.");
         screen.Text(8,29,"P: pause | ENTER: next stage | R: replay | N: new run");
         screen.Text(8,30,"M: end run and return to the difficulty menu");
+        screen.Text(8,31,"I: autopilot | O: CEM/PPO | Move/fire: take over",Color::Cyan);
         screen.Text(8,32,"H / ? / ENTER: close guide    Q: quit",Color::Yellow);
         screen.Text(8,33,"The game stays frozen while this guide is open.",Color::Dim);
         screen.Present();
@@ -169,6 +174,7 @@ namespace MyGame
            <<"Score: "<<game.Score()<<" | Best: "<<scores.Best(game.Mode(),game.SkipsTutorial()).score<<'\n'
            <<"Expeditions cleared: "<<game.Stats().expeditionsCleared<<" | Stars: "<<game.Stats().stars<<" | Crates: "<<game.Stats().crates<<'\n'
            <<"Hits: "<<game.Stats().hits<<" | Patrols stunned: "<<game.Stats().stuns<<" | Active time: "<<Clock(game.Stats().elapsedMillis)<<'\n';
+        if(game.Assisted()) out<<"AI-assisted run: personal best not saved.\n";
         if(!scores.Error().empty()) out<<scores.Error()<<'\n';
         return out.str();
     }
