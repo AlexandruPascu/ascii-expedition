@@ -114,6 +114,12 @@ These commands replace the corresponding model files and benchmark report. To ke
 - `native.py` provides native episodes and CEM policy loading; `environment.py` adapts episodes to Gymnasium.
 - `train_cem.py`, `train_ppo.py`, `evaluate.py`, and `watch.py` train, compare, and play back the agents.
 - `ctest` covers 64 timed AI expeditions, native/animated parity, actual crate shots, boosts, repeatable seeds, invalid actions, Python bindings, and disjoint data splits. Native AI tests also run under ASan/UBSan.
-- `python ai/smoke_test.py` checks Gymnasium compliance, runs small CEM/PPO training jobs, reloads the resulting models, replays both committed models, and checks terminal restoration after animated playback on POSIX.
+- `python ai/smoke_test.py` checks Gymnasium compliance, runs small CEM/PPO training jobs, reloads the resulting models, replays both committed models, compares rendered and headless episodes with PyTorch already loaded, and checks terminal restoration after animated playback for **both CEM and PPO** on POSIX.
 
 The standard game and CEM have no PyTorch dependency. The optional learning CI job installs CPU dependencies and runs the smoke check; full training is not repeated in CI.
+
+### Linux compiler-runtime troubleshooting
+
+If headless PPO succeeds but playback crashes while rendering the first frame, check the native library with `ldd build/libexpedition_ai.so`. This project encountered that failure with an extracted GCC installation whose `libstdc++.so` symlink was broken: the linker embedded a static C++ runtime while PyTorch loaded the shared runtime. Repairing the compiler's shared-runtime link and rebuilding resolved the conflict. A normal shared-runtime build lists `libstdc++.so.6` in `ldd` output.
+
+After repairing that compiler installation, rebuild with `cmake --build build --clean-first --parallel 2` and run `python ai/smoke_test.py` using the PPO environment. The smoke check includes actual rendering and terminal playback; a `--headless` run alone cannot validate that path.
