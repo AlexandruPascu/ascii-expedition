@@ -1,6 +1,6 @@
 # ASCII Expedition
 
-A C++ terminal arcade game that began as a learning project at a five-session EA game-development workshop in Bucharest. Learn the controls in two short tutorials, then collect stars, dodge guards and scouts, time your approach to sentries, and blast bonus crates in procedurally generated expeditions. Choose a difficulty, build a run score, and try to beat your saved best.
+A C++ terminal arcade game that began as a learning project at a five-session EA game-development workshop in Bucharest. Learn the controls in two short tutorials, then collect stars, dodge guards and scouts, time your approach to sentries, and blast bonus crates in procedurally generated expeditions. Choose a difficulty, build a run score, and try to beat your saved best. Trained cross-entropy and PPO agents can also play generated expeditions using shared pathfinding.
 
 ## Workshop credit
 
@@ -42,6 +42,18 @@ Choose **1 / 2 / 3** for Relaxed / Normal / Hard. **T** toggles the two-stage tu
 ![A real terminal capture showing a generated expedition, three patrol types, bonus crates, power-ups, and the game HUD.](docs/gameplay.svg)
 
 *Normal difficulty, seed 42. The dots around the sentry warn that its pulse is about to fire.*
+
+## Watch a trained AI
+
+After building, watch the included cross-entropy agent collect bonuses, shoot crates, and reach the exit:
+
+```sh
+python3 ai/watch.py --agent cem --seed 42
+```
+
+The optional PPO agent uses a small neural policy. Both learn objective selection on top of the same native pathfinding and timed game rules. On 128 held-out Normal expeditions, CEM averaged **3,699 points**, PPO **3,626**, and the nearest-star baseline **2,601**; all cleared every map. The guaranteed safe routes make this a scoring and planning experiment.
+
+See the **[AI guide](ai/README.md)** for PPO setup, replay controls, readable CEM weights, training commands, benchmark data, and limitations. Human play has no machine-learning dependency.
 
 ## How to play
 

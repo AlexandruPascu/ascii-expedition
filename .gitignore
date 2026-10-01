@@ -3,3 +3,7 @@
 /.ea-workshop-highscores*
 __pycache__/
 *.pyc
+
+/ai/runs/
+/ai/models/*-last.zip
+/.venv/
