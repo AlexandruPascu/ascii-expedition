@@ -228,3 +228,12 @@ python3 tools/capture_preview.py build/MyFirstGame docs/gameplay.svg
 The capture uses a temporary score file and restores the terminal when finished.
 
 No external game engine or third-party C++ library is required.
+
+## License
+
+My own work here is under the [MIT License](LICENSE). It does not cover the 13 files below, which come from the 2019 workshop project, including my later changes to them. I can't tell which of their parts were workshop-provided (see [Workshop credit](#workshop-credit)), so I can't license them.
+
+- `My first Game/`: `CMakeLists.txt`, `MyFirstGame.cpp`, `README.md`
+- `My first Game/Geometry/`: `Pinocchio.h`, `PixelMatrix.h`, `Rectangle.h`, `Shape.h`, `SpatialShape.h`
+- `My first Game/Model/`: `Personaj.h`, `Stone.h`
+- `My first Game/System/`: `KbInput.h`, `TermScreen.cpp`, `TermScreen.h`
